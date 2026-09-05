@@ -81,12 +81,35 @@ separately.
 - `/static/*path` — `*path` must be the last segment and captures the rest
   of the path, including any slashes in it.
 
+## Serving with net/http
+
+`Table.Match` returns a tag, not a handler, so it needs no wrapping to stay
+usable outside `net/http` at all. `Dispatcher` is the adapter for when you
+do want an `http.Handler`: it maps each tag to a handler and does the
+`Match` call for you.
+
+```go
+rt := router.New()
+rt.Handle("GET", "/users/:id", "user-show")
+
+d := router.NewDispatcher(rt)
+d.HandleFunc("user-show", func(w http.ResponseWriter, r *http.Request) {
+    id := router.ParamsFromContext(r.Context())["id"]
+    fmt.Fprintf(w, "user %s", id)
+})
+
+http.ListenAndServe(":8080", d)
+```
+
+Tags with no registered handler, and paths with no matching route, both
+fall through to `d.NotFound` if set, or `http.NotFound` otherwise.
+
 ## Status
 
-This is an early skeleton: the matching tree and the streaming loader work
-and are tested, but there's no HTTP integration helper yet, no route
-priority rules beyond static-before-param-before-wildcard, and no tooling to
-generate a manifest. See the roadmap in the repo for what's next.
+The matching tree, the streaming loader, and the net/http adapter work and
+are tested. Still missing: route priority rules beyond
+static-before-param-before-wildcard, benchmarks, atomic table reloads, a
+manifest writer, and query string / trailing-slash redirect handling.
 
 ## License
 
