@@ -106,10 +106,13 @@ fall through to `d.NotFound` if set, or `http.NotFound` otherwise.
 
 ## Status
 
-The matching tree, the streaming loader, and the net/http adapter work and
-are tested. Still missing: route priority rules beyond
-static-before-param-before-wildcard, benchmarks, atomic table reloads, a
-manifest writer, and query string / trailing-slash redirect handling.
+The matching tree, the streaming loader, and the net/http adapter work,
+are tested, and have benchmarks covering static, param, and wildcard
+matches plus `LoadRoutes` on a large manifest (`go test -bench .`). Route
+priority is already fixed by construction: static beats param beats
+wildcard at each segment, and `Handle` rejects anything that would make
+that ambiguous. Still missing: atomic table reloads, a manifest writer,
+and query string / trailing-slash redirect handling.
 
 ## License
 
