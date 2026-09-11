@@ -2,7 +2,9 @@ package router
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"sync/atomic"
 )
 
 type contextKey int
@@ -22,7 +24,7 @@ func ParamsFromContext(ctx context.Context) Params {
 // to the http.Handler that should serve it, since a manifest-loaded table
 // never carries Go handler values itself.
 type Dispatcher struct {
-	table    *Table
+	table    atomic.Pointer[Table]
 	handlers map[string]http.Handler
 
 	// NotFound is used when the path doesn't match any route, or matches
@@ -31,14 +33,36 @@ type Dispatcher struct {
 	NotFound http.Handler
 }
 
-// NewDispatcher returns a Dispatcher backed by t. Routes may still be added
-// to t after this call; Dispatcher always looks up the current state of the
-// table.
+// NewDispatcher returns a Dispatcher backed by t. Callers that need to
+// change routes while the server is running should not mutate t further;
+// build a new Table and call Swap or Reload instead, since t may still be
+// in use by a request that is being served concurrently.
 func NewDispatcher(t *Table) *Dispatcher {
-	return &Dispatcher{
-		table:    t,
-		handlers: make(map[string]http.Handler),
+	d := &Dispatcher{handlers: make(map[string]http.Handler)}
+	d.table.Store(t)
+	return d
+}
+
+// Swap replaces the table used for requests received after Swap returns.
+// Requests already in ServeHTTP keep using the table they looked up; there
+// is no lock held across a request, so a swap never blocks or is blocked by
+// in-flight traffic.
+func (d *Dispatcher) Swap(t *Table) {
+	d.table.Store(t)
+}
+
+// Reload builds a new Table from the manifest read from r with LoadRoutes
+// and, on success, Swaps it in atomically. If r contains a malformed line or
+// a conflicting route, Reload returns the error from LoadRoutes and leaves
+// the table currently serving requests untouched.
+func (d *Dispatcher) Reload(r io.Reader) (int, error) {
+	t := New()
+	n, err := LoadRoutes(t, r)
+	if err != nil {
+		return n, err
 	}
+	d.Swap(t)
+	return n, nil
 }
 
 // Handle associates tag with h. tag is whatever string was passed as the
@@ -56,7 +80,7 @@ func (d *Dispatcher) HandleFunc(tag string, h http.HandlerFunc) {
 // Params in the request context, retrievable with ParamsFromContext, and
 // delegates to the handler registered for the matched tag.
 func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	tag, params, ok := d.table.Match(r.Method, r.URL.Path)
+	tag, params, ok := d.table.Load().Match(r.Method, r.URL.Path)
 	if !ok {
 		d.serveNotFound(w, r)
 		return

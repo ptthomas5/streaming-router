@@ -104,6 +104,29 @@ http.ListenAndServe(":8080", d)
 Tags with no registered handler, and paths with no matching route, both
 fall through to `d.NotFound` if set, or `http.NotFound` otherwise.
 
+## Reloading routes while serving
+
+`Dispatcher` holds its table behind an atomic pointer, so the table backing
+a running server can be replaced without a lock around every request.
+`Swap` takes a `*Table` you built yourself; `Reload` builds one for you from
+a fresh manifest read:
+
+```go
+n, err := d.Reload(f)
+if err != nil {
+    // the table already serving requests is untouched
+    log.Printf("reload failed, keeping old routes: %v", err)
+    return
+}
+log.Printf("reloaded %d routes", n)
+```
+
+A request already in `ServeHTTP` finishes against the table it looked up;
+a swap only changes what the *next* request sees. Handlers registered with
+`Handle`/`HandleFunc` are unaffected by a swap — tags in the new table need
+to already have a handler registered, or they'll fall through to
+`d.NotFound` like any other unmatched tag.
+
 ## Status
 
 The matching tree, the streaming loader, and the net/http adapter work,
@@ -111,8 +134,9 @@ are tested, and have benchmarks covering static, param, and wildcard
 matches plus `LoadRoutes` on a large manifest (`go test -bench .`). Route
 priority is already fixed by construction: static beats param beats
 wildcard at each segment, and `Handle` rejects anything that would make
-that ambiguous. Still missing: atomic table reloads, a manifest writer,
-and query string / trailing-slash redirect handling.
+that ambiguous. Table reloads are atomic via `Dispatcher.Swap`/`Reload`.
+Still missing: a manifest writer, and query string / trailing-slash
+redirect handling.
 
 ## License
 
