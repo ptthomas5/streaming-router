@@ -81,6 +81,29 @@ separately.
 - `/static/*path` — `*path` must be the last segment and captures the rest
   of the path, including any slashes in it.
 
+## Writing a manifest
+
+`WriteRoutes` is the other direction: given a `*Table`, it writes the same
+line format `LoadRoutes` reads, sorted by method then pattern so the output
+is stable across runs and diffs cleanly in version control.
+
+```go
+f, err := os.Create("routes.manifest")
+if err != nil {
+    log.Fatal(err)
+}
+defer f.Close()
+
+if err := router.WriteRoutes(f, rt); err != nil {
+    log.Fatalf("writing manifest: %v", err)
+}
+```
+
+Unlike `LoadRoutes`, `WriteRoutes` builds the full list of routes in memory
+before writing — it's meant for dumping a table built in code, or round-
+tripping one loaded from a manifest, not for tables too large to fit in
+memory in the first place.
+
 ## Serving with net/http
 
 `Table.Match` returns a tag, not a handler, so it needs no wrapping to stay
@@ -129,13 +152,13 @@ to already have a handler registered, or they'll fall through to
 
 ## Status
 
-The matching tree, the streaming loader, and the net/http adapter work,
-are tested, and have benchmarks covering static, param, and wildcard
-matches plus `LoadRoutes` on a large manifest (`go test -bench .`). Route
-priority is already fixed by construction: static beats param beats
-wildcard at each segment, and `Handle` rejects anything that would make
-that ambiguous. Table reloads are atomic via `Dispatcher.Swap`/`Reload`.
-Still missing: a manifest writer, and query string / trailing-slash
+The matching tree, the streaming loader, the manifest writer, and the
+net/http adapter work, are tested, and have benchmarks covering static,
+param, and wildcard matches plus `LoadRoutes` on a large manifest
+(`go test -bench .`). Route priority is already fixed by construction:
+static beats param beats wildcard at each segment, and `Handle` rejects
+anything that would make that ambiguous. Table reloads are atomic via
+`Dispatcher.Swap`/`Reload`. Still missing: query string and trailing-slash
 redirect handling.
 
 ## License

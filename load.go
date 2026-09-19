@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -52,4 +53,77 @@ func LoadRoutes(t *Table, r io.Reader) (int, error) {
 		return loaded, fmt.Errorf("router: reading manifest: %w", err)
 	}
 	return loaded, nil
+}
+
+// WriteRoutes writes every route in t to w in the manifest format LoadRoutes
+// reads, one "METHOD PATTERN TAG" line per route. Output is sorted by method
+// and then pattern so that writing the same table twice always produces the
+// same bytes, which keeps round-tripped manifests diffable in version
+// control.
+//
+// WriteRoutes is meant for small, occasional dumps (an admin endpoint, a
+// migration script); it builds the full list of routes in memory before
+// writing, unlike LoadRoutes which streams.
+func WriteRoutes(w io.Writer, t *Table) error {
+	type entry struct {
+		method, pattern, tag string
+	}
+
+	var entries []entry
+	for method, root := range t.roots {
+		for _, r := range collectRoutes(root) {
+			entries = append(entries, entry{method, r.pattern, r.tag})
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].method != entries[j].method {
+			return entries[i].method < entries[j].method
+		}
+		return entries[i].pattern < entries[j].pattern
+	})
+
+	bw := bufio.NewWriter(w)
+	for _, e := range entries {
+		if _, err := fmt.Fprintf(bw, "%s %s %s\n", e.method, e.pattern, e.tag); err != nil {
+			return err
+		}
+	}
+	return bw.Flush()
+}
+
+type routeEntry struct {
+	pattern, tag string
+}
+
+// collectRoutes walks n and its descendants, reconstructing the pattern
+// string for every tagged node from the segment names recorded on the tree
+// (a node itself doesn't know its own segment; the parent that points at it
+// does).
+func collectRoutes(n *node) []routeEntry {
+	return appendRoutes(nil, n, nil)
+}
+
+func appendRoutes(out []routeEntry, n *node, segs []string) []routeEntry {
+	if n.hasTag {
+		pattern := "/" + strings.Join(segs, "/")
+		out = append(out, routeEntry{pattern: pattern, tag: n.tag})
+	}
+
+	names := make([]string, 0, len(n.static))
+	for name := range n.static {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		out = appendRoutes(out, n.static[name], append(append([]string{}, segs...), name))
+	}
+
+	if n.param != nil {
+		out = appendRoutes(out, n.param, append(append([]string{}, segs...), ":"+n.paramName))
+	}
+	if n.wildcard != nil {
+		out = appendRoutes(out, n.wildcard, append(append([]string{}, segs...), "*"+n.wildcardName))
+	}
+	return out
 }
