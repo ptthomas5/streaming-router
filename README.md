@@ -81,6 +81,14 @@ separately.
 - `/static/*path` — `*path` must be the last segment and captures the rest
   of the path, including any slashes in it.
 
+A query string on the path passed to `Match` (`/users/42?active=true`) is
+stripped before matching and doesn't affect which route is chosen. Its
+values are parsed into the same `Params` map as path captures, under their
+own keys — a query key with the same name as a path parameter is dropped in
+favor of the path value. Requests served through `Dispatcher` never carry a
+query string in `r.URL.Path` in the first place, since `net/http` already
+splits it out; use `r.URL.Query()` there directly if you need it.
+
 ## Writing a manifest
 
 `WriteRoutes` is the other direction: given a `*Table`, it writes the same
@@ -158,8 +166,9 @@ param, and wildcard matches plus `LoadRoutes` on a large manifest
 (`go test -bench .`). Route priority is already fixed by construction:
 static beats param beats wildcard at each segment, and `Handle` rejects
 anything that would make that ambiguous. Table reloads are atomic via
-`Dispatcher.Swap`/`Reload`. Still missing: query string and trailing-slash
-redirect handling.
+`Dispatcher.Swap`/`Reload`. `Match` strips and parses a query string on the
+path it's given, rather than letting it break matching. Still missing:
+trailing-slash redirect handling.
 
 ## License
 

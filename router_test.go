@@ -53,6 +53,54 @@ func TestHandleAndMatch(t *testing.T) {
 	}
 }
 
+func TestMatchQueryString(t *testing.T) {
+	rt := New()
+	if err := rt.Handle("GET", "/users/:id", "user-show"); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if err := rt.Handle("GET", "/search", "search"); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	tag, params, ok := rt.Match("GET", "/users/42?active=true&id=ignored")
+	if !ok || tag != "user-show" {
+		t.Fatalf("Match with query string = (%q, %v, %v), want (%q, _, true)", tag, params, ok, "user-show")
+	}
+	if params["id"] != "42" {
+		t.Errorf("params[id] = %q, want %q (path param must win over query key of the same name)", params["id"], "42")
+	}
+	if params["active"] != "true" {
+		t.Errorf("params[active] = %q, want %q", params["active"], "true")
+	}
+
+	tag, params, ok = rt.Match("GET", "/search?q=go+routers&q=second")
+	if !ok || tag != "search" {
+		t.Fatalf("Match with query string = (%q, %v, %v), want (%q, _, true)", tag, params, ok, "search")
+	}
+	if params["q"] != "go routers" {
+		t.Errorf("params[q] = %q, want %q (first value of a repeated key)", params["q"], "go routers")
+	}
+
+	if _, _, ok := rt.Match("GET", "/nope?x=1"); ok {
+		t.Fatal("Match with query string on a non-matching path, want ok == false")
+	}
+}
+
+func TestMatchQueryStringMalformedIgnored(t *testing.T) {
+	rt := New()
+	if err := rt.Handle("GET", "/health", "health-check"); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	tag, params, ok := rt.Match("GET", "/health?%zz")
+	if !ok || tag != "health-check" {
+		t.Fatalf("Match with malformed query string = (%q, %v, %v), want (%q, _, true)", tag, params, ok, "health-check")
+	}
+	if len(params) != 0 {
+		t.Errorf("params for malformed query string = %v, want empty", params)
+	}
+}
+
 func TestHandleConflict(t *testing.T) {
 	rt := New()
 	if err := rt.Handle("GET", "/users/:id", "a"); err != nil {

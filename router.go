@@ -7,6 +7,7 @@ package router
 
 import (
 	"errors"
+	"net/url"
 	"strings"
 )
 
@@ -112,16 +113,60 @@ func (t *Table) Handle(method, pattern, tag string) error {
 	return nil
 }
 
-// Match looks up the route registered for method and path. ok is false if
-// no route matches. The returned Params is nil when the matched pattern
-// captured nothing, so callers can range over it without a nil check.
+// Match looks up the route registered for method and path. path may carry a
+// query string ("/users/42?active=true"); it is stripped before matching so
+// it never affects which route is chosen, and its values are parsed into
+// the returned Params under their own keys. A query key that collides with
+// a captured path parameter is ignored, so a route's own segments always
+// win. ok is false if no route matches. The returned Params is nil when the
+// matched pattern captured nothing and the query string was empty or absent,
+// so callers can range over it without a nil check.
 func (t *Table) Match(method, path string) (tag string, params Params, ok bool) {
 	root, exists := t.roots[method]
 	if !exists {
 		return "", nil, false
 	}
+	path, rawQuery := splitQuery(path)
 	segs := splitPath(path)
-	return matchNode(root, segs, nil)
+	tag, params, ok = matchNode(root, segs, nil)
+	if !ok {
+		return "", nil, false
+	}
+	if rawQuery != "" {
+		params = mergeQuery(params, rawQuery)
+	}
+	return tag, params, true
+}
+
+// splitQuery separates a path from its query string at the first '?', the
+// same split net/url does for a request URI. The query string itself is
+// returned without the leading '?'.
+func splitQuery(path string) (string, string) {
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		return path[:i], path[i+1:]
+	}
+	return path, ""
+}
+
+// mergeQuery parses rawQuery and adds each key to params, keeping the first
+// value of a repeated key the way url.Values.Get does. A malformed query
+// string (invalid percent-encoding) is treated as empty rather than turning
+// a route match into an error, since the path already matched on its own.
+func mergeQuery(params Params, rawQuery string) Params {
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return params
+	}
+	for k, v := range values {
+		if len(v) == 0 {
+			continue
+		}
+		if _, exists := params[k]; exists {
+			continue
+		}
+		params = addParam(params, k, v[0])
+	}
+	return params
 }
 
 func matchNode(n *node, segs []string, params Params) (string, Params, bool) {
