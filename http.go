@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -31,6 +32,16 @@ type Dispatcher struct {
 	// a route whose tag has no registered handler. If nil, http.NotFound
 	// is used.
 	NotFound http.Handler
+
+	// RedirectTrailingSlash, when true, makes ServeHTTP retry an unmatched
+	// path with its trailing slash added or removed before falling through
+	// to NotFound. If that alternate path matches a route, the request is
+	// redirected there instead of being served directly, so a client that
+	// followed a stale or hand-typed link with the wrong number of slashes
+	// lands on the same route a fresh visitor would. GET and HEAD get a 301;
+	// every other method gets a 308, since redirecting a POST with a 301 or
+	// 302 lets some clients silently turn it into a GET.
+	RedirectTrailingSlash bool
 }
 
 // NewDispatcher returns a Dispatcher backed by t. Callers that need to
@@ -80,8 +91,17 @@ func (d *Dispatcher) HandleFunc(tag string, h http.HandlerFunc) {
 // Params in the request context, retrievable with ParamsFromContext, and
 // delegates to the handler registered for the matched tag.
 func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	tag, params, ok := d.table.Load().Match(r.Method, r.URL.Path)
+	table := d.table.Load()
+	tag, params, ok := table.Match(r.Method, r.URL.Path)
 	if !ok {
+		if d.RedirectTrailingSlash {
+			if alt, changed := toggleTrailingSlash(r.URL.Path); changed {
+				if _, _, ok := table.Match(r.Method, alt); ok {
+					d.redirect(w, r, alt)
+					return
+				}
+			}
+		}
 		d.serveNotFound(w, r)
 		return
 	}
@@ -102,4 +122,27 @@ func (d *Dispatcher) serveNotFound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.NotFound(w, r)
+}
+
+func (d *Dispatcher) redirect(w http.ResponseWriter, r *http.Request, path string) {
+	u := *r.URL
+	u.Path = path
+	code := http.StatusMovedPermanently
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		code = http.StatusPermanentRedirect
+	}
+	http.Redirect(w, r, u.String(), code)
+}
+
+// toggleTrailingSlash returns path with its trailing slash added or removed,
+// and whether a toggle was possible at all. "/" has no non-empty variant
+// without its slash, so it reports no change rather than returning "".
+func toggleTrailingSlash(path string) (string, bool) {
+	if path == "/" {
+		return "", false
+	}
+	if strings.HasSuffix(path, "/") {
+		return strings.TrimSuffix(path, "/"), true
+	}
+	return path + "/", true
 }

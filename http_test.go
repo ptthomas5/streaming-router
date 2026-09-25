@@ -179,6 +179,91 @@ func TestDispatcherReloadErrorKeepsOldTable(t *testing.T) {
 	}
 }
 
+func TestDispatcherRedirectTrailingSlashAdded(t *testing.T) {
+	rt := New()
+	if err := rt.Handle("GET", "/users/", "user-list"); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	d := NewDispatcher(rt)
+	d.RedirectTrailingSlash = true
+	d.HandleFunc("user-list", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/users?active=true", nil)
+	d.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusMovedPermanently)
+	}
+	if got, want := rec.Header().Get("Location"), "/users/?active=true"; got != want {
+		t.Fatalf("Location = %q, want %q", got, want)
+	}
+}
+
+func TestDispatcherRedirectTrailingSlashRemoved(t *testing.T) {
+	rt := New()
+	if err := rt.Handle("POST", "/users", "user-create"); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	d := NewDispatcher(rt)
+	d.RedirectTrailingSlash = true
+	d.HandleFunc("user-create", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/users/", nil)
+	d.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPermanentRedirect {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusPermanentRedirect)
+	}
+	if got, want := rec.Header().Get("Location"), "/users"; got != want {
+		t.Fatalf("Location = %q, want %q", got, want)
+	}
+}
+
+func TestDispatcherRedirectTrailingSlashDisabledByDefault(t *testing.T) {
+	rt := New()
+	if err := rt.Handle("GET", "/users/", "user-list"); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	d := NewDispatcher(rt)
+	d.HandleFunc("user-list", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/users", nil)
+	d.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestDispatcherRedirectTrailingSlashNoAlternate(t *testing.T) {
+	rt := New()
+	if err := rt.Handle("GET", "/health", "health-check"); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	d := NewDispatcher(rt)
+	d.RedirectTrailingSlash = true
+	d.HandleFunc("health-check", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	d.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
 func TestDispatcherSwapConcurrentWithRequests(t *testing.T) {
 	rt := New()
 	if err := rt.Handle("GET", "/health", "health-check"); err != nil {

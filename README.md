@@ -158,6 +158,25 @@ a swap only changes what the *next* request sees. Handlers registered with
 to already have a handler registered, or they'll fall through to
 `d.NotFound` like any other unmatched tag.
 
+## Trailing-slash redirects
+
+`Table.Match` treats `/users` and `/users/` as different patterns — each one
+has to be registered on its own. `Dispatcher.RedirectTrailingSlash` is off by
+default; set it to `true` to have `ServeHTTP` retry an unmatched path with
+its trailing slash added or removed before giving up:
+
+```go
+d := router.NewDispatcher(rt)
+d.RedirectTrailingSlash = true
+```
+
+If that alternate path matches a route, the client is redirected there
+instead — a 301 for `GET`/`HEAD`, a 308 for everything else, since a 301 or
+302 on a `POST` lets some clients silently turn it into a `GET` on the
+redirected request. The query string, if any, is preserved. If neither the
+original nor the alternate path matches anything, the request falls through
+to `d.NotFound` as usual.
+
 ## Status
 
 The matching tree, the streaming loader, the manifest writer, and the
@@ -167,8 +186,8 @@ param, and wildcard matches plus `LoadRoutes` on a large manifest
 static beats param beats wildcard at each segment, and `Handle` rejects
 anything that would make that ambiguous. Table reloads are atomic via
 `Dispatcher.Swap`/`Reload`. `Match` strips and parses a query string on the
-path it's given, rather than letting it break matching. Still missing:
-trailing-slash redirect handling.
+path it's given, rather than letting it break matching. Trailing-slash
+redirects are available via `Dispatcher.RedirectTrailingSlash`.
 
 ## License
 
